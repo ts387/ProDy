@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""This module defines a class and a function for explicit membrane ANM calculations."""
+"""This module defines a class and a function for explicit membrane GNM calculations."""
 
 import numpy as np
 
@@ -8,8 +8,7 @@ from prody.atomic import Atomic, AtomGroup
 from prody.utilities import importLA, checkCoords, copy
 from numpy import sqrt, zeros, array, ceil, dot
 
-from .anm import ANM
-from .gnm import checkENMParameters
+from .gnm import GNM, checkENMParameters
 from .editing import _reduceModel
 
 LA = importLA()
@@ -17,13 +16,13 @@ inv = LA.inv
 pinv = LA.pinv
 norm = LA.norm
 
-__all__ = ['exANM']
+__all__ = ['exGNM']
 
-class exANM(ANM):
+class exGNM(GNM):
 
-    """Class for explicit ANM (exANM) method ([FT00]_).
+    """Class for explicit GNM (exGNM) method ([FT00]_).
     Optional arguments build a membrane lattice permit analysis of membrane
-     effect on elastic network models in *exANM* method described in [TL12]_.
+     effect on elastic network models in *exGNM* method described in [TL12]_.
 
     .. [TL12] Lezon TR, Bahar I, Constraints Imposed by the Membrane
        Selectively Guide the Alternating Access Dynamics of the Glutamate
@@ -33,12 +32,12 @@ class exANM(ANM):
 
     def __init__(self, name='Unknown'):
 
-        super(exANM, self).__init__(name)
+        super(exGNM, self).__init__(name)
         self._membrane = None
         self._combined = None
 
     def buildMembrane(self, coords, **kwargs):
-        """Build Hessian matrix for given coordinate set.
+        """Build Kirchhoff matrix for given coordinate set.
 
         :arg coords: a coordinate set or an object with ``getCoords`` method
         :type coords: :class:`numpy.ndarray`
@@ -56,7 +55,7 @@ class exANM(ANM):
                  Default is **0**, which is not hollow
         :type Ri: float
 
-        :arg r: radius of each membrane node. Default is **3.1**
+        :arg r: radius of each membrane node. Default is *.1**
         :type r: float
         
         :arg lat: lattice type which could be **FCC** (face-centered-cubic, default), 
@@ -180,8 +179,8 @@ class exANM(ANM):
             coords = self._combineMembraneProtein(atoms)
             return coords
 
-    def buildHessian(self, coords, cutoff=15., gamma=1., **kwargs):
-        """Build Hessian matrix for given coordinate set. 
+    def buildKirchhoff(self, coords, cutoff=15., gamma=1., **kwargs):
+        """Build Kirchhoff matrix for given coordinate set. 
         **kwargs** are passed to :method:`.buildMembrane`.
 
         :arg coords: a coordinate set or an object with ``getCoords`` method
@@ -218,22 +217,22 @@ class exANM(ANM):
         system = zeros(coords.shape[0], dtype=bool)
         system[:n_atoms] = True
 
-        LOGGER.timeit('_exanm')
+        LOGGER.timeit('_exgnm')
 
         if turbo:
-            self._hessian = buildReducedHessian(coords, system, cutoff, gamma, **kwargs)
+            self._kirchhoff = buildReducedKirchhoff(coords, system, cutoff, gamma, **kwargs)
         else:
-            super(exANM, self).buildHessian(coords, cutoff, gamma, **kwargs)
+            super(exGNM, self).buildKirchhoff(coords, cutoff, gamma, **kwargs)
             system = np.repeat(system, 3)
-            self._hessian = _reduceModel(self._hessian, system)
+            self._kirchhoff = _reduceModel(self._kirchhoff, system)
 
-        LOGGER.report('Hessian was built in %.2fs.', label='_exanm')
-        self._dof = self._hessian.shape[0]
+        LOGGER.report('Kirchhoff was built in %.2fs.', label='_exgnm')
+        self._dof = self._kirchhoff.shape[0]
         self._n_atoms = n_atoms
     
     def calcModes(self, n_modes=20, zeros=False, turbo=True):
         """Calculate normal modes.  This method uses :func:`scipy.linalg.eigh`
-        function to diagonalize the Hessian matrix. When Scipy is not found,
+        function to diagonalize the Kirchhoff matrix. When Scipy is not found,
         :func:`numpy.linalg.eigh` is used.
 
         :arg n_modes: number of non-zero eigenvalues/vectors to calculate.
@@ -247,7 +246,7 @@ class exANM(ANM):
         :type turbo: bool, default is **True**
         """
 
-        super(exANM, self).calcModes(n_modes, zeros, turbo)
+        super(exGNM, self).calcModes(n_modes, zeros, turbo)
 
     def getMembrane(self):
         """Returns a copy of the membrane coordinates."""
@@ -375,37 +374,37 @@ def peelr(coords, system, r0=20., dr=20.):
 
     return labels
 
-def buildReducedHessian(coords, system, cutoff=15., gamma=1.0, **kwargs):
+def buildReducedKirchhoff(coords, system, cutoff=15., gamma=1.0, **kwargs):
     
     r0 = kwargs.pop('r0', 20.)
     dr = kwargs.pop('dr', 20.)
     labels = peelr(coords, system, r0, dr)
     LOGGER.debug('layers: ' + str(np.unique(labels)))
 
-    H = calcHessianRecursion(coords, labels, 0, cutoff=cutoff, gamma=gamma, **kwargs)
-    return H
+    G = calcKirchhoffRecursion(coords, labels, 0, cutoff=cutoff, gamma=gamma, **kwargs)
+    return G
 
-def calcHessianRecursion(coords, layers, layer, cutoff=15., gamma=1.0, **kwargs):
+def calcKirchhoffRecursion(coords, layers, layer, cutoff=15., gamma=1.0, **kwargs):
     if layer == 0:
         LOGGER.debug('max layer: %d'%max(layers))
     LOGGER.debug('layer: %d'%layer)
-    Hss, Hse = buildLayerHessian(coords, layers, layer, cutoff=cutoff, gamma=gamma, **kwargs)
+    Gss, Gse = buildLayerKirchhoff(coords, layers, layer, cutoff=cutoff, gamma=gamma, **kwargs)
 
-    if Hse is None: # last layer, Hee=Hss
-        H = Hss
+    if Gse is None: # last layer, Gee=Gss
+        G = Gss
     else:
-        Hee = calcHessianRecursion(coords, layers, layer+1, cutoff=cutoff, gamma=gamma, **kwargs)
-        Cee = inv(Hee)
-        #H = Hss - Hse.dot(Cee.dot(Hse.T))
-        #H = Hss - Hse @ Cee @ Hse.T
+        Gee = calcKirchhoffRecursion(coords, layers, layer+1, cutoff=cutoff, gamma=gamma, **kwargs)
+        Cee = inv(Gee)
+        #G = Gss - Gse.dot(Cee.dot(Gse.T))
+        #G = Gss - Gse @ Cee @ Gse.T
         if PY3K:
-            H = Hss - Hse.__matmul__(Cee).__matmul__(Hse.T)
+            G = Gss - Gse.__matmul__(Cee).__matmul__(Gse.T)
         else:
-            H = Hss - Hse.dot(Cee.dot(Hse.T))
+            G = Gss - Gse.dot(Cee.dot(Gse.T))
     LOGGER.debug('layer: %d finished'%layer)
-    return H
+    return G
 
-def buildLayerHessian(coords, layers, layer, cutoff=15., gamma=1.0, **kwargs):
+def buildLayerKirchhoff(coords, layers, layer, cutoff=15., gamma=1.0, **kwargs):
     gmem = kwargs.pop('gamma_memb', gamma)
 
     torf_inner = layers == (layer-1)
@@ -420,50 +419,47 @@ def buildLayerHessian(coords, layers, layer, cutoff=15., gamma=1.0, **kwargs):
     n_env_atoms = len(coords_env)
     n_inner_atoms = len(coords_inner)
     
-    Hss = np.zeros((n_sys_atoms*3, n_sys_atoms*3))
-    Hse = np.zeros((n_sys_atoms*3, n_env_atoms*3)) if n_env_atoms else None
+    Gss = np.zeros((n_sys_atoms, n_sys_atoms))
+    Gse = np.zeros((n_sys_atoms, n_env_atoms)) if n_env_atoms else None
     
     cutoff2 = cutoff * cutoff
     for i in range(n_sys_atoms):
         coordi = coords_sys[i, :]
-        I = slice(i*3, (i+1)*3)
+        I = slice(i, (i+1))
 
         # sys-sys
         for j in range(i+1, n_sys_atoms):
             coordj = coords_sys[j, :]
-            J = slice(j*3, (j+1)*3)
+            J = slice(j, (j+1))
 
             v = coordi - coordj
             dist2 = np.inner(v, v)
             if dist2 < cutoff2:
                 g = gamma if layer == 0 else gmem
-                superelement = np.outer(v, v)*g/dist2
-                Hss[I, J] = Hss[J, I] = -superelement
-                Hss[I, I] += superelement
-                Hss[J, J] += superelement
+                Gss[I, J] = Gss[J, I] = -g
+                Gss[I, I] += g
+                Gss[J, J] += g
 
         # sys-env
         for k in range(n_env_atoms):
             coordk = coords_env[k, :]
-            K = slice(k*3, (k+1)*3)
+            K = slice(k, (k+1))
 
             v = coordi - coordk
             dist2 = np.inner(v, v)
             if dist2 < cutoff2:
                 g = gmem 
-                superelement = np.outer(v, v)*g/dist2
-                Hse[I, K] = -superelement
-                Hss[I, I] += superelement
+                Gse[I, K] = -g
+                Gss[I, I] += g
 
         # sys-inner
         for k in range(n_inner_atoms):
             coordk = coords_inner[k, :]
-            K = slice(k*3, (k+1)*3)
+            K = slice(k, (k+1))
 
             v = coordi - coordk
             dist2 = np.inner(v, v)
             if dist2 < cutoff2:
                 g = gmem
-                superelement = np.outer(v, v)*g/dist2
-                Hss[I, I] += superelement
-    return Hss, Hse
+                Gss[I, I] += g
+    return Gss, Gse
