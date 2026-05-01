@@ -2,6 +2,7 @@
 [![ProDy conda-forge page](https://anaconda.org/conda-forge/prody/badges/version.svg)](https://anaconda.org/conda-forge/prody)
 [![ProDy pypi page](https://img.shields.io/pypi/v/ProDy.svg)](https://pypi.org/project/ProDy/)
 [![Docs](https://img.shields.io/readthedocs/prody-official.svg?logo=read-the-docs&logoColor=white)](https://prody-official.readthedocs.io/en/latest/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prody/ProDy/blob/claude/prody-colab-notebook-VFYRv/docs/notebooks/ProDy_Colab_Tutorial.ipynb)
 
 ## Synopsis
 
